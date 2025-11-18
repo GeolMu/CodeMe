@@ -43,7 +43,7 @@ _2025년 새싹 해커톤(SeSAC Hackathon) – CODE:ME 팀 기획 & 기술 문�
   - 클린업(불필요 텍스트 제거)
   - 의미 단위로 **Chunk 분할**
   - 메타데이터(파일명, 작성일, 페이지/섹션 정보 등) 부여
-  - Embedding 벡터 생성 → 벡터 스토어(예: Azure AI Search, Pinecone)에 저장
+  - Embedding 벡터 생성 → 벡터 스토어(Azure AI Search)에 저장
 - 질의 시, 관련 문서 chunk를 검색 → LLM이 이를 바탕으로 답변 생성
 
 ---
@@ -63,7 +63,7 @@ _2025년 새싹 해커톤(SeSAC Hackathon) – CODE:ME 팀 기획 & 기술 문�
 
 3. **맥락 없는 Q&A**
    - 일반적인 AI 챗봇은 “인터넷 지식”에는 강하지만  
-     **“내 데이터와 내 문맥”**을 이해해서 답변해주지 못함
+     “내 데이터와 내 문맥”을 이해해서 답변해주지 못함
 
 ### 3-2. HEYME의 해결 방식
 
@@ -119,7 +119,7 @@ _2025년 새싹 해커톤(SeSAC Hackathon) – CODE:ME 팀 기획 & 기술 문�
      2. 파일 내용 파싱 (PDF/DOCX/PPTX/HTML 등)
      3. 텍스트 전처리 및 Chunk 분할
      4. Embedding 생성 (Azure OpenAI Embedding)
-     5. 벡터 스토어(Azure AI Search 등)에 Upsert
+     5. 벡터 스토어(Azure AI Search)에 Upsert
 
 4. **챗봇 질의 & 응답**
 
@@ -153,7 +153,7 @@ _2025년 새싹 해커톤(SeSAC Hackathon) – CODE:ME 팀 기획 & 기술 문�
 
 - ChatGPT, Gemini, Claude 등 생성형 AI가 일상에 깊게 들어오면서,
 - “모델이 얼마나 대단한가?”보다  
-  **“내 삶과 업무에 어떻게 녹여낼 것인가?”**가 더 중요해짐.
+  “내 삶과 업무에 어떻게 녹여낼 것인가?”가 더 중요해짐.
 
 ### 5-2. 개인화된 지능형 워크플로우의 필요성
 
