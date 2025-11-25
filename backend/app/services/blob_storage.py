@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import BinaryIO, Optional
+from typing import BinaryIO, Iterable, Optional
 
 from azure.core.exceptions import AzureError
 from azure.storage.blob import BlobServiceClient, ContainerClient, ContentSettings
@@ -48,3 +48,29 @@ def upload_blob(
         )
     except AzureError as exc:
         raise RuntimeError(f"Failed to upload blob: {exc}") from exc
+
+
+def delete_blob(container: ContainerClient, blob_path: str) -> None:
+    """
+    Delete a blob, ignoring missing blobs.
+    """
+    try:
+        container.delete_blob(blob_path, delete_snapshots="include")
+    except AzureError as exc:
+        # Swallow "not found", surface others
+        message = str(exc)
+        if "BlobNotFound" in message:
+            return
+        raise RuntimeError(f"Failed to delete blob: {exc}") from exc
+
+
+def download_blob(container: ContainerClient, blob_path: str) -> Iterable[bytes]:
+    """
+    Stream blob content in chunks.
+    """
+    try:
+        blob_client = container.get_blob_client(blob_path)
+        stream = blob_client.download_blob()
+        return stream.chunks()
+    except AzureError as exc:
+        raise RuntimeError(f"Failed to download blob: {exc}") from exc

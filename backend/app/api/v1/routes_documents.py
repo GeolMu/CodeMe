@@ -5,6 +5,7 @@ from typing import List
 
 from azure.storage.blob import ContainerClient
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.v1.deps import get_db, get_current_user
@@ -12,7 +13,12 @@ from app.core.config import settings
 from app.models.document import Document, DocumentStatus
 from app.models.user import User
 from app.schemas.document import DocumentRead
-from app.services.blob_storage import get_blob_container_client, upload_blob
+from app.services.blob_storage import (
+    delete_blob,
+    download_blob,
+    get_blob_container_client,
+    upload_blob,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -98,3 +104,47 @@ async def upload_document(
 
     db.refresh(document)
     return document
+
+
+@router.get("/{document_id}/download")
+def download_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    container: ContainerClient = Depends(get_blob_container_client),
+):
+    doc = db.get(Document, document_id)
+    if not doc or doc.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    try:
+        chunks = download_blob(container, doc.blob_path)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+    content_type = doc.mime_type or "application/octet-stream"
+    headers = {"Content-Disposition": f'attachment; filename="{doc.original_file_name}"'}
+    return StreamingResponse(chunks, media_type=content_type, headers=headers)
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    container: ContainerClient = Depends(get_blob_container_client),
+):
+    doc = db.get(Document, document_id)
+    if not doc or doc.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    # Try to delete blob first (best effort)
+    try:
+        delete_blob(container, doc.blob_path)
+    except RuntimeError:
+        # If blob deletion fails for reasons other than not-found, surface error
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to delete blob")
+
+    db.delete(doc)
+    db.commit()
+    return None
