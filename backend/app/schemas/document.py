@@ -1,7 +1,7 @@
 from uuid import UUID
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from app.models.document import DocumentStatus
 
 
@@ -23,3 +23,10 @@ class DocumentRead(BaseModel):
     error_message: str | None = None
     created_at: datetime      # 🔹 여기를 str → datetime
     updated_at: datetime      # 🔹 여기도 str → datetime
+
+
+class DocumentIndexCallback(BaseModel):
+    document_id: UUID = Field(..., description="documents.id (UUID)")
+    status: DocumentStatus
+    chunk_count: int | None = Field(default=None, description="청킹 완료한 chunk 수")
+    error_message: str | None = Field(default=None, description="실패 시 에러 메시지")

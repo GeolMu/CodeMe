@@ -1,18 +1,20 @@
 import os
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
+import httpx
 from azure.storage.blob import ContainerClient
-from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.v1.deps import get_db, get_current_user
+from app.api.v1.deps import get_current_user, get_db
 from app.core.config import settings
 from app.models.document import Document, DocumentStatus
 from app.models.user import User
-from app.schemas.document import DocumentRead
+from app.schemas.document import DocumentIndexCallback, DocumentRead
 from app.services.blob_storage import (
     delete_blob,
     download_blob,
@@ -148,3 +150,90 @@ def delete_document(
     db.delete(doc)
     db.commit()
     return None
+
+
+@router.post("/{document_id}/index", response_model=DocumentRead)
+async def trigger_index_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    인덱싱 트리거 (stub).
+    나중에 n8n 워크플로 호출 + 콜백으로 상태를 갱신할 예정.
+    """
+    doc = db.get(Document, document_id)
+    if not doc or doc.user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    if doc.status == DocumentStatus.PROCESSING:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is already processing")
+
+    # processing 상태로 전환
+    doc.status = DocumentStatus.PROCESSING
+    doc.last_indexed_at = None
+    doc.error_message = None
+    if doc.chunk_count is None:
+        doc.chunk_count = 0
+
+    db.commit()
+    db.refresh(doc)
+
+    # n8n 트리거 호출
+    if settings.n8n_index_webhook_url:
+        payload = {
+            "document_id": str(doc.id),
+            "user_id": str(doc.user_id),
+            "blob_path": doc.blob_path,
+            "mime_type": doc.mime_type,
+            "source": doc.source,
+            "title": doc.title,
+            "original_file_name": doc.original_file_name,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(settings.n8n_index_webhook_url, json=payload)
+                resp.raise_for_status()
+        except Exception as exc:
+            doc.status = DocumentStatus.FAILED
+            doc.error_message = f"n8n trigger failed: {exc}"
+            db.commit()
+            db.refresh(doc)
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to trigger indexing")
+    else:
+        # 설정이 없으면 임시로 processed로 전환
+        doc.status = DocumentStatus.PROCESSED
+        doc.last_indexed_at = datetime.utcnow()
+        db.commit()
+        db.refresh(doc)
+
+    return doc
+
+
+@router.post("/callback/index", response_model=DocumentRead)
+def indexing_callback(
+    payload: DocumentIndexCallback,
+    db: Session = Depends(get_db),
+    x_n8n_token: str | None = Header(default=None, alias="X-N8N-Token"),
+):
+    """
+    n8n 워크플로에서 인덱싱 완료/실패 시 호출하는 콜백
+    """
+    if settings.n8n_callback_token and x_n8n_token != settings.n8n_callback_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid callback token")
+
+    doc = db.get(Document, payload.document_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    if payload.status not in {DocumentStatus.PROCESSED, DocumentStatus.FAILED}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status for callback")
+
+    doc.status = payload.status
+    doc.chunk_count = payload.chunk_count or 0
+    doc.last_indexed_at = datetime.utcnow()
+    doc.error_message = payload.error_message
+
+    db.commit()
+    db.refresh(doc)
+    return doc

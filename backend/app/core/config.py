@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # Upload policy
     max_upload_size_mb: int = Field(default=20, env="MAX_UPLOAD_SIZE_MB")
 
+    # n8n webhooks
+    n8n_index_webhook_url: str = Field(default="", env="N8N_INDEX_WEBHOOK_URL")
+    n8n_callback_token: str = Field(default="", env="N8N_CALLBACK_TOKEN")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
