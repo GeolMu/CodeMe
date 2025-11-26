@@ -47,14 +47,10 @@ async def upload_document(
     current_user: User = Depends(get_current_user),
     container: ContainerClient = Depends(get_blob_container_client),
 ):
-    """
-    사용자별 Blob 업로드 + documents 메타데이터 기록
-    """
     safe_name = Path(file.filename or "upload.bin").name
     doc_id = uuid.uuid4()
     blob_path = f"{current_user.id}/{doc_id}/original/{safe_name}"
 
-    # 파일 크기 계산
     try:
         file.file.seek(0, os.SEEK_END)
         size_bytes = file.file.tell()
@@ -62,7 +58,6 @@ async def upload_document(
     except Exception:
         size_bytes = None
 
-    # 업로드 제한 검사
     if settings.max_upload_size_mb and size_bytes is not None:
         max_bytes = settings.max_upload_size_mb * 1024 * 1024
         if size_bytes > max_bytes:
@@ -71,7 +66,6 @@ async def upload_document(
                 detail=f"File too large (>{settings.max_upload_size_mb}MB)",
             )
 
-    # Blob 업로드
     try:
         upload_blob(container, blob_path, file.file, content_type=file.content_type)
     except RuntimeError as exc:
@@ -96,7 +90,6 @@ async def upload_document(
     try:
         db.commit()
     except Exception:
-        # DB 실패 시 업로드 롤백 시도
         try:
             container.delete_blob(blob_path, delete_snapshots="include")
         except Exception:
@@ -140,16 +133,40 @@ def delete_document(
     if not doc or doc.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Try to delete blob first (best effort)
     try:
         delete_blob(container, doc.blob_path)
     except RuntimeError:
-        # If blob deletion fails for reasons other than not-found, surface error
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to delete blob")
 
     db.delete(doc)
     db.commit()
     return None
+
+
+@router.post("/callback/index", response_model=DocumentRead)
+def indexing_callback(
+    payload: DocumentIndexCallback,
+    db: Session = Depends(get_db),
+    x_n8n_token: str | None = Header(default=None, alias="X-N8N-Token"),
+):
+    if settings.n8n_callback_token and x_n8n_token != settings.n8n_callback_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid callback token")
+
+    doc = db.get(Document, payload.document_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    if payload.status not in {DocumentStatus.PROCESSED, DocumentStatus.FAILED}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status for callback")
+
+    doc.status = payload.status
+    doc.chunk_count = payload.chunk_count or 0
+    doc.last_indexed_at = datetime.utcnow()
+    doc.error_message = payload.error_message
+
+    db.commit()
+    db.refresh(doc)
+    return doc
 
 
 @router.post("/{document_id}/index", response_model=DocumentRead)
@@ -158,10 +175,6 @@ async def trigger_index_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    인덱싱 트리거 (stub).
-    나중에 n8n 워크플로 호출 + 콜백으로 상태를 갱신할 예정.
-    """
     doc = db.get(Document, document_id)
     if not doc or doc.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
@@ -169,7 +182,6 @@ async def trigger_index_document(
     if doc.status == DocumentStatus.PROCESSING:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document is already processing")
 
-    # processing 상태로 전환
     doc.status = DocumentStatus.PROCESSING
     doc.last_indexed_at = None
     doc.error_message = None
@@ -179,7 +191,6 @@ async def trigger_index_document(
     db.commit()
     db.refresh(doc)
 
-    # n8n 트리거 호출
     if settings.n8n_index_webhook_url:
         payload = {
             "document_id": str(doc.id),
@@ -201,39 +212,9 @@ async def trigger_index_document(
             db.refresh(doc)
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to trigger indexing")
     else:
-        # 설정이 없으면 임시로 processed로 전환
         doc.status = DocumentStatus.PROCESSED
         doc.last_indexed_at = datetime.utcnow()
         db.commit()
         db.refresh(doc)
 
-    return doc
-
-
-@router.post("/callback/index", response_model=DocumentRead)
-def indexing_callback(
-    payload: DocumentIndexCallback,
-    db: Session = Depends(get_db),
-    x_n8n_token: str | None = Header(default=None, alias="X-N8N-Token"),
-):
-    """
-    n8n 워크플로에서 인덱싱 완료/실패 시 호출하는 콜백
-    """
-    if settings.n8n_callback_token and x_n8n_token != settings.n8n_callback_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid callback token")
-
-    doc = db.get(Document, payload.document_id)
-    if not doc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
-
-    if payload.status not in {DocumentStatus.PROCESSED, DocumentStatus.FAILED}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status for callback")
-
-    doc.status = payload.status
-    doc.chunk_count = payload.chunk_count or 0
-    doc.last_indexed_at = datetime.utcnow()
-    doc.error_message = payload.error_message
-
-    db.commit()
-    db.refresh(doc)
     return doc
