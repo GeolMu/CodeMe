@@ -43,9 +43,6 @@ class Settings(BaseSettings):
     azure_openai_endpoint: Optional[str] = None
     azure_openai_api_key: Optional[str] = None
     azure_openai_embed_deployment: Optional[str] = None
-    azure_openai_chat_deployment: Optional[str] = None
-    azure_openai_api_version: Optional[str] = None
-    azure_openai_chat_deployment: Optional[str] = None
 
     # Azure AI Search
     azure_search_endpoint: Optional[str] = None
@@ -55,6 +52,7 @@ class Settings(BaseSettings):
     # n8n callbacks
     fastapi_callback_url: Optional[str] = None
     n8n_callback_token: Optional[str] = None
+    n8n_index_webhook_url: Optional[str] = None
 
     model_config = SettingsConfigDict(
         env_file=[
