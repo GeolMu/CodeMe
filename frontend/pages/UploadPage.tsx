@@ -16,6 +16,7 @@ const UploadPage: React.FC = () => {
   const [groups, setGroups] = useState<DocumentGroup[]>([]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null); // null = 루트
   const [draggingDocId, setDraggingDocId] = useState<string | null>(null);
+  const [personaDraft, setPersonaDraft] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -40,6 +41,10 @@ const UploadPage: React.FC = () => {
       ]);
       setDocs(docsRes);
       setGroups(groupsRes);
+      if (selectedGroupId) {
+        const current = groupsRes.find(g => g.id === selectedGroupId);
+        setPersonaDraft(current?.persona_prompt || '');
+      }
     } catch (e: any) {
       setError(e.message || '문서 목록을 불러오지 못했습니다.');
     } finally {
@@ -49,7 +54,7 @@ const UploadPage: React.FC = () => {
 
   useEffect(() => {
     fetchDocs();
-  }, []);
+  }, [selectedGroupId]);
 
   // 간단한 폴링: 처리 중 문서가 있을 때 주기적으로 목록을 갱신해 콜백 상태를 반영
   useEffect(() => {
@@ -141,6 +146,20 @@ const UploadPage: React.FC = () => {
       setError(err.message || '이동 실패');
     } finally {
       setDraggingDocId(null);
+    }
+  };
+
+  const handleSavePersona = async () => {
+    if (!ensureToken()) return;
+    if (!selectedGroupId) {
+      setError('먼저 폴더를 선택하세요.');
+      return;
+    }
+    try {
+      const updated = await documentService.updateGroupPersona(selectedGroupId, personaDraft);
+      setGroups(prev => prev.map(g => (g.id === updated.id ? updated : g)));
+    } catch (err: any) {
+      setError(err.message || '페르소나 저장 실패');
     }
   };
 
@@ -306,6 +325,27 @@ const UploadPage: React.FC = () => {
                 </div>
               ))}
             </div>
+
+            {selectedGroupId && (
+              <div className="px-6 pb-4">
+                <label className="text-xs text-gray-500 block mb-1">폴더 페르소나 / 시스템 프롬프트</label>
+                <textarea
+                  value={personaDraft}
+                  onChange={e => setPersonaDraft(e.target.value)}
+                  placeholder="이 폴더의 문서 기반 챗봇에게 적용할 톤/지침을 입력하세요."
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  rows={3}
+                />
+                <div className="mt-2 flex justify-end">
+                  <button
+                    onClick={handleSavePersona}
+                    className="px-3 py-1.5 bg-purple-600 text-white text-xs rounded-lg hover:bg-purple-700"
+                  >
+                    페르소나 저장
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="overflow-y-auto flex-1 p-2">
               {loading ? (

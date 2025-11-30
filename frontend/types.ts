@@ -68,6 +68,7 @@ export interface DocumentGroup {
   user_id: string;
   name: string;
   description?: string | null;
+  persona_prompt?: string | null;
   created_at: string;
   updated_at: string;
 }

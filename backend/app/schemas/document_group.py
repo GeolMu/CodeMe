@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 class DocumentGroupBase(BaseModel):
     name: str
     description: str | None = None
+    persona_prompt: str | None = None
 
 
 class DocumentGroupCreate(DocumentGroupBase):
@@ -16,6 +17,7 @@ class DocumentGroupCreate(DocumentGroupBase):
 class DocumentGroupUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    persona_prompt: str | None = None
 
 
 class DocumentGroupRead(DocumentGroupBase):

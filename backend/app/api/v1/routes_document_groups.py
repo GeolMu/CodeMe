@@ -42,6 +42,7 @@ def create_group(
         user_id=current_user.id,
         name=payload.name,
         description=payload.description,
+        persona_prompt=payload.persona_prompt,
     )
     db.add(group)
     db.commit()
@@ -64,6 +65,8 @@ def update_group(
         group.name = payload.name
     if payload.description is not None:
         group.description = payload.description
+    if payload.persona_prompt is not None:
+        group.persona_prompt = payload.persona_prompt
 
     db.commit()
     db.refresh(group)

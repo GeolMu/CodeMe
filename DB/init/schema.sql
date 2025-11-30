@@ -30,6 +30,7 @@ CREATE TABLE document_groups (
     user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name        VARCHAR(100) NOT NULL,
     description TEXT,
+    persona_prompt TEXT,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );

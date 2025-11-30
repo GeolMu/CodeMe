@@ -8,6 +8,7 @@ from app.api.v1.search_vector import embed_query, vector_search
 from app.api.v1.chat_rag import call_chat_model
 from app.models.link import Link
 from app.models.qa_log import QALog
+from app.models.document_group import DocumentGroup
 from app.schemas.chat import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -32,7 +33,13 @@ async def ask_via_link(
     # TODO: visibility가 "private"인 경우 인증/비밀번호 검증 추가
     # TODO: password_hash 검증 로직 추가 (payload에 password 받는 구조 설계 필요)
 
-    # RAG 파이프라인: 링크가 가리키는 단일 문서만 대상으로 검색
+    persona_prompt = None
+    if link.group_id:
+        group = db.get(DocumentGroup, link.group_id)
+        if group:
+            persona_prompt = group.persona_prompt
+
+    # RAG 파이프라인: 링크가 가리키는 단일 문서만 대상으로 검색 (또는 그룹 단위)
     query_vec = await embed_query(payload.question)
     search_result = await vector_search(
         query_vector=query_vec,
@@ -42,7 +49,7 @@ async def ask_via_link(
         top_k=5,
     )
 
-    answer = await call_chat_model(payload.question, search_result.hits)
+    answer = await call_chat_model(payload.question, search_result.hits, persona_prompt)
 
     # 링크 메타데이터 업데이트
     link.access_count += 1

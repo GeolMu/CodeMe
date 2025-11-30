@@ -18,6 +18,7 @@ from app.api.v1.search_vector import (
 from app.core.config import settings
 from app.models.qa_log import QALog
 from app.models.user import User
+from app.models.document_group import DocumentGroup
 from sqlalchemy.orm import Session
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
@@ -60,7 +61,7 @@ class ChatLogRead(BaseModel):
 ChatLogRead.model_rebuild()
 
 
-async def call_chat_model(question: str, hits: List[SearchHit]) -> str:
+async def call_chat_model(question: str, hits: List[SearchHit], persona_prompt: str | None = None) -> str:
     """Call Azure OpenAI chat with RAG prompt."""
     context_parts = []
     for i, h in enumerate(hits, start=1):
@@ -69,11 +70,14 @@ async def call_chat_model(question: str, hits: List[SearchHit]) -> str:
         context_parts.append(f"[doc#{i} | {title}]\n{content}")
     context_text = "\n\n".join(context_parts) if context_parts else "No relevant documents were found for this user."
 
-    system_msg = (
+    base_system = (
         "You are an AI assistant that answers the user's questions based ONLY on the provided documents. "
         "If the documents do not contain enough information, say you are not sure. "
         "Answer in Korean, be concise but clear."
     )
+    system_msg = persona_prompt if persona_prompt else base_system
+    if persona_prompt:
+        system_msg += "\n\n(위 지침은 이 폴더 전용 페르소나로 설정되었습니다.)"
     user_msg = f"User question:\n{question}\n\nRelevant documents:\n{context_text}"
 
     if not settings.azure_openai_endpoint or not settings.azure_openai_api_key or not settings.azure_openai_chat_deployment:
@@ -138,7 +142,14 @@ async def chat_with_rag(
         top_k=payload.top_k,
     )
 
-    answer = await call_chat_model(payload.question, search_result.hits)
+    persona_prompt = None
+    if payload.group_id:
+        group = db.get(DocumentGroup, payload.group_id)
+        if not group or group.user_id != current_user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+        persona_prompt = group.persona_prompt
+
+    answer = await call_chat_model(payload.question, search_result.hits, persona_prompt)
 
     sources: List[ChatSource] = [
         ChatSource(

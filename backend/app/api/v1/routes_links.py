@@ -58,8 +58,14 @@ def create_link(
         .first()
     )
     if existing:
-        db.refresh(existing)
-        return existing
+        not_expired = existing.expires_at is None or existing.expires_at > datetime.utcnow()
+        if not_expired:
+            db.refresh(existing)
+            return existing
+        # 만료된 기존 링크는 비활성화하고 새로 발급
+        existing.is_active = False
+        db.add(existing)
+        db.commit()
 
     link_id = generate_link_id()
 

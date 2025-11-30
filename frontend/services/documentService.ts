@@ -67,4 +67,12 @@ export const documentService = {
       body: JSON.stringify({ group_id: groupId }),
     });
   },
+
+  async updateGroupPersona(id: string, persona: string | null): Promise<DocumentGroup> {
+    return apiClient.request<DocumentGroup>(`/api/v1/document-groups/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona_prompt: persona }),
+    });
+  },
 };
