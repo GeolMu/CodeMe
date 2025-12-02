@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session
 from app.api.v1.deps import get_db
 from app.api.v1.search_vector import embed_query, vector_search
 from app.api.v1.chat_rag import call_chat_model, _looks_no_answer
-from app.core.question_normalizer import normalize_question_semantic
+from app.core.question_normalizer import normalize_question_semantic, extract_keywords_for_cloud
 from app.models.link import Link
 from app.models.qa_log import QALog
 from app.models.document_group import DocumentGroup
+from app.models.qa_keyword import QAKetword
 from app.schemas.chat import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -76,6 +77,12 @@ async def ask_via_link(
         )
         db.add(qa_log)
         db.commit()
+        # 키워드 저장
+        if normalized:
+            keywords = extract_keywords_for_cloud(payload.question, normalized)
+            for kw in keywords:
+                db.add(QAKetword(qa_log_id=qa_log.id, keyword=kw))
+            db.commit()
     except Exception:
         db.rollback()
 

@@ -17,10 +17,11 @@ from app.api.v1.search_vector import (
     SearchHit,
 )
 from app.core.config import settings
-from app.core.question_normalizer import normalize_question_semantic
+from app.core.question_normalizer import normalize_question_semantic, extract_keywords_for_cloud
 from app.models.qa_log import QALog
 from app.models.user import User
 from app.models.document_group import DocumentGroup
+from app.models.qa_keyword import QAKetword
 from sqlalchemy.orm import Session
 import re
 
@@ -229,6 +230,12 @@ async def chat_with_rag(
         )
         db.add(qa_log)
         db.commit()
+        # 키워드 저장 (best-effort)
+        if normalized:
+            keywords = extract_keywords_for_cloud(payload.question, normalized)
+            for kw in keywords:
+                db.add(QAKetword(qa_log_id=qa_log.id, keyword=kw))
+            db.commit()
     except Exception as e:
         logger.exception("chat_with_rag: qa_log 저장 중 예외 발생 - rollback 수행", exc_info=e)
         try:

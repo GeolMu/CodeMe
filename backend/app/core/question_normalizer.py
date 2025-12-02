@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import Iterable, List
 
 import httpx
 
@@ -49,12 +50,12 @@ def postprocess_normalized(s: str) -> str:
     # 1) 앞에 붙은 주어/대명사 제거
     for p in PRONOUN_PREFIXES:
         if s.startswith(p):
-            s = s[len(p) :].strip()
+            s = s[len(p):].strip()
 
     # 2) 자주 나오는 패턴: "이 사람 ~" 이 남아 있으면 한 번 더 제거
     for p in ["이 사람 ", "그 사람 ", "저 사람 "]:
         if s.startswith(p):
-            s = s[len(p) :].strip()
+            s = s[len(p):].strip()
 
     # 3) 이름 관련 패턴 통합
     if s.endswith("이름") and s != "이름":
@@ -65,6 +66,79 @@ def postprocess_normalized(s: str) -> str:
         s = "좋아하는 것"
 
     return s.strip()
+
+
+# ------------------------------
+# Keyword extraction for word cloud
+# ------------------------------
+STOPWORDS_KO: set[str] = {
+    "뭐야", "뭐임", "뭐니", "뭐죠",
+    "설명", "정보", "알려줘", "알려 주세요", "알려주세요",
+    "해줘", "해주세요", "해 주라", "해주라",
+    "관련", "에 대해", "에대한", "대해서",
+    "방법", "어떻게", "왜", "언제", "어디", "무엇",
+}
+
+STOPWORDS_EN: set[str] = {
+    "what", "is", "are", "about", "tell", "me",
+    "please", "how", "why", "when", "where",
+}
+
+
+def _dedup_preserve_order(tokens: Iterable[str]) -> List[str]:
+    seen: set[str] = set()
+    result: List[str] = []
+    for t in tokens:
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(t)
+    return result
+
+
+def extract_keywords_for_cloud(
+    question: str,
+    normalized: str | None = None,
+    max_keywords: int = 3,
+) -> List[str]:
+    """
+    워드클라우드용 키워드를 뽑는다.
+
+    - normalized_question을 우선 사용, 없으면 simple normalize(question)
+    - postprocess_normalized로 의도 표현을 통합
+    - 한글/영문/숫자 토큰 추출 후 불용어/숫자/1글자 제거
+    - 중복 제거 후 상위 max_keywords 반환
+    """
+    base = normalized or _simple_normalize(question)
+    try:
+        base = postprocess_normalized(base)
+    except Exception:
+        pass
+
+    if not base:
+        return []
+
+    raw_tokens = re.findall(r"[가-힣A-Za-z0-9]+", base)
+    if not raw_tokens:
+        return []
+
+    cand: List[str] = []
+    for tok in raw_tokens:
+        t = tok.strip()
+        if len(t) <= 1:
+            continue
+        if t.isdigit():
+            continue
+        if t in STOPWORDS_KO or t.lower() in STOPWORDS_EN:
+            continue
+        cand.append(t)
+
+    if not cand:
+        return []
+
+    uniq = _dedup_preserve_order(cand)
+    return uniq[:max_keywords]
 
 
 async def normalize_question_semantic(question: str) -> str:
