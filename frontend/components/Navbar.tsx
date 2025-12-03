@@ -51,11 +51,12 @@ const Navbar: React.FC<NavbarProps> = ({ onLoginClick }) => {
 
           {/* Right Actions */}
           <div className="flex items-center space-x-4">
-            <Link to={PageRoute.PRICING}>
-              <button className="hidden md:block px-4 py-2 text-sm font-medium text-brand-primary border border-brand-primary rounded-lg hover:bg-purple-50 transition-colors">
-                업그레이드
-              </button>
-            </Link>
+            <button
+              onClick={() => navigate(PageRoute.PRICING)}
+              className="hidden md:block px-4 py-2 text-sm font-medium text-brand-primary border border-brand-primary rounded-lg hover:bg-purple-50 transition-colors"
+            >
+              업그레이드
+            </button>
             
             {user ? (
                <div className="flex items-center gap-4">
