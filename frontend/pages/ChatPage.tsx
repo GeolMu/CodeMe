@@ -1,12 +1,14 @@
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Icons } from '../components/Icons';
-import { ChatMessage } from '../types';
-import { dbService } from '../services/dbService';
-import { chatService, ChatLog } from '../services/chatService';
-import { apiClient } from '../services/api';
-import { Cloud, CloudOff } from 'lucide-react';
+import { ChatService } from '../services/chatService';
+import { Message, ChatLog } from '../types';
+import { HeyMeLogo } from '../components/HeyMeLogo';
+import { CodeMeLogo } from '../components/CodeMeLogo';
 import { useAuth } from '../context/AuthContext';
+import { chatService } from '../services/chatService';
+import { apiClient } from '../services/api';
+import { dbService } from '../services/dbService';
+import { Cloud, CloudOff } from 'lucide-react';
 
 // Separate component to prevent re-rendering issues
 interface SatisfactionSurveyProps {
@@ -95,7 +97,16 @@ const SatisfactionSurvey: React.FC<SatisfactionSurveyProps> = ({ onDismiss, onSu
 
 const ChatPage: React.FC = () => {
   // --- State Management ---
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: 'init',
+      role: 'model',
+      text: '안녕하세요! 👋\n저는 Hey Me입니다. 당신의 개인 AI 에이전트입니다. 무엇을 도와드릴까요?',
+      timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: new Date().toISOString(),
+      sessionId: Date.now().toString(),
+    }
+  ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   
@@ -115,6 +126,8 @@ const ChatPage: React.FC = () => {
   
   // Connection state
   const [isConnected, setIsConnected] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true); // 초기 로드 추적
+  const [cleanedDummy, setCleanedDummy] = useState(false); // 데모 메시지 제거 여부
   const { user } = useAuth();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -136,24 +149,76 @@ const ChatPage: React.FC = () => {
             sessionId: Date.now().toString(),
           },
         ]);
+        setTimeout(() => setIsInitialLoad(false), 100); // 초기 로드 완료
         return;
       }
       try {
         const logs: ChatLog[] = await chatService.listLogs();
         if (logs.length === 0) {
-          setMessages([
+          // 더미 데이터로 대화 기록 생성
+          const dummyMessages: Message[] = [
             {
-              id: 'init',
+              id: 'dummy-1',
               role: 'model',
               text: '안녕하세요! 👋\n저는 Hey Me입니다. 당신의 개인 AI 에이전트입니다. 무엇을 도와드릴까요?',
-              timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-              createdAt: new Date().toISOString(),
-              sessionId: Date.now().toString(),
+              timestamp: '09:30',
+              createdAt: new Date(Date.now() - 3600000).toISOString(),
+              sessionId: 'demo-session',
             },
-          ]);
+            {
+              id: 'dummy-2',
+              role: 'user',
+              text: 'Code:Me 플랫폼에 대해 설명해줄 수 있어?',
+              timestamp: '09:31',
+              createdAt: new Date(Date.now() - 3500000).toISOString(),
+              sessionId: 'demo-session',
+            },
+            {
+              id: 'dummy-3',
+              role: 'model',
+              text: '물론이죠! Code:Me는 AI 기반 자동화 플랫폼으로, Hey Me라는 개인 AI 챗봇 서비스를 제공합니다.\n\n주요 기능:\n• 문서 업로드를 통한 AI 학습\n• 24시간 자동 응답 챗봇\n• RAG 기술을 활용한 정확한 답변\n• 공유 가능한 챗봇 링크 생성\n\n당신의 정보를 학습시키면 AI가 당신을 대신해 응답합니다!',
+              timestamp: '09:31',
+              createdAt: new Date(Date.now() - 3400000).toISOString(),
+              sessionId: 'demo-session',
+            },
+            {
+              id: 'dummy-4',
+              role: 'user',
+              text: '어떤 종류의 파일을 업로드할 수 있어?',
+              timestamp: '09:33',
+              createdAt: new Date(Date.now() - 3200000).toISOString(),
+              sessionId: 'demo-session',
+            },
+            {
+              id: 'dummy-5',
+              role: 'model',
+              text: '다양한 텍스트 기반 파일 형식을 지원합니다:\n\n📄 PDF - 보고서, 논문, 매뉴얼\n📝 TXT - 일반 텍스트 파일\n📋 MD - 마크다운 문서\n📊 DOCX - Word 문서\n\n업로드한 파일은 자동으로 인덱싱되어 AI가 내용을 학습하고, 질문에 대한 답변에 활용합니다. 파일은 업로드 페이지에서 관리할 수 있습니다!',
+              timestamp: '09:33',
+              createdAt: new Date(Date.now() - 3100000).toISOString(),
+              sessionId: 'demo-session',
+            },
+            {
+              id: 'dummy-6',
+              role: 'user',
+              text: 'RAG 기술이 뭐야?',
+              timestamp: '09:35',
+              createdAt: new Date(Date.now() - 2900000).toISOString(),
+              sessionId: 'demo-session',
+            },
+            {
+              id: 'dummy-7',
+              role: 'model',
+              text: 'RAG는 "Retrieval-Augmented Generation"의 약자로, 검색 증강 생성이라고 합니다.\n\n🔍 작동 원리:\n1. 사용자 질문 분석\n2. 업로드된 문서에서 관련 정보 검색\n3. 검색된 정보를 바탕으로 정확한 답변 생성\n\n✨ 장점:\n• 환각(Hallucination) 현상 감소\n• 실제 문서 기반 정확한 답변\n• 출처 추적 가능\n\nHey Me는 이 기술로 당신의 문서를 학습해서 정확하게 답변합니다!',
+              timestamp: '09:35',
+              createdAt: new Date(Date.now() - 2800000).toISOString(),
+              sessionId: 'demo-session',
+            },
+          ];
+          setMessages(dummyMessages);
+          setTimeout(() => setIsInitialLoad(false), 100); // 초기 로드 완료
           return;
         }
-        const restored: ChatMessage[] = [];
+        const restored: Message[] = [];
         logs.forEach(log => {
           const ts = log.created_at
             ? new Date(log.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
@@ -176,17 +241,69 @@ const ChatPage: React.FC = () => {
           });
         });
         setMessages(restored);
+        setTimeout(() => setIsInitialLoad(false), 100); // 초기 로드 완료
       } catch (e) {
-        setMessages([
+        // API 오류 시에도 더미 데이터 표시
+        const dummyMessages: Message[] = [
           {
-            id: 'init',
+            id: 'dummy-1',
             role: 'model',
             text: '안녕하세요! 👋\n저는 Hey Me입니다. 당신의 개인 AI 에이전트입니다. 무엇을 도와드릴까요?',
-            timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-            createdAt: new Date().toISOString(),
-            sessionId: Date.now().toString(),
+            timestamp: '09:30',
+            createdAt: new Date(Date.now() - 3600000).toISOString(),
+            sessionId: 'demo-session',
           },
-        ]);
+          {
+            id: 'dummy-2',
+            role: 'user',
+            text: 'Code:Me 플랫폼에 대해 설명해줄 수 있어?',
+            timestamp: '09:31',
+            createdAt: new Date(Date.now() - 3500000).toISOString(),
+            sessionId: 'demo-session',
+          },
+          {
+            id: 'dummy-3',
+            role: 'model',
+            text: '물론이죠! Code:Me는 AI 기반 자동화 플랫폼으로, Hey Me라는 개인 AI 챗봇 서비스를 제공합니다.\n\n주요 기능:\n• 문서 업로드를 통한 AI 학습\n• 24시간 자동 응답 챗봇\n• RAG 기술을 활용한 정확한 답변\n• 공유 가능한 챗봇 링크 생성\n\n당신의 정보를 학습시키면 AI가 당신을 대신해 응답합니다!',
+            timestamp: '09:31',
+            createdAt: new Date(Date.now() - 3400000).toISOString(),
+            sessionId: 'demo-session',
+          },
+          {
+            id: 'dummy-4',
+            role: 'user',
+            text: '어떤 종류의 파일을 업로드할 수 있어?',
+            timestamp: '09:33',
+            createdAt: new Date(Date.now() - 3200000).toISOString(),
+            sessionId: 'demo-session',
+          },
+          {
+            id: 'dummy-5',
+            role: 'model',
+            text: '다양한 텍스트 기반 파일 형식을 지원합니다:\n\n📄 PDF - 보고서, 논문, 매뉴얼\n📝 TXT - 일반 텍스트 파일\n📋 MD - 마크다운 문서\n📊 DOCX - Word 문서\n\n업로드한 파일은 자동으로 인덱싱되어 AI가 내용을 학습하고, 질문에 대한 답변에 활용합니다. 파일은 업로드 페이지에서 관리할 수 있습니다!',
+            timestamp: '09:33',
+            createdAt: new Date(Date.now() - 3100000).toISOString(),
+            sessionId: 'demo-session',
+          },
+          {
+            id: 'dummy-6',
+            role: 'user',
+            text: 'RAG 기술이 뭐야?',
+            timestamp: '09:35',
+            createdAt: new Date(Date.now() - 2900000).toISOString(),
+            sessionId: 'demo-session',
+          },
+          {
+            id: 'dummy-7',
+            role: 'model',
+            text: 'RAG는 "Retrieval-Augmented Generation"의 약자로, 검색 증강 생성이라고 합니다.\n\n🔍 작동 원리:\n1. 사용자 질문 분석\n2. 업로드된 문서에서 관련 정보 검색\n3. 검색된 정보를 바탕으로 정확한 답변 생성\n\n✨ 장점:\n• 환각(Hallucination) 현상 감소\n• 실제 문서 기반 정확한 답변\n• 출처 추적 가능\n\nHey Me는 이 기술로 당신의 문서를 학습해서 정확하게 답변합니다!',
+            timestamp: '09:35',
+            createdAt: new Date(Date.now() - 2800000).toISOString(),
+            sessionId: 'demo-session',
+          },
+        ];
+        setMessages(dummyMessages);
+        setTimeout(() => setIsInitialLoad(false), 100); // 초기 로드 완료
       }
     };
     loadLogs();
@@ -203,7 +320,7 @@ const ChatPage: React.FC = () => {
       }
   }, [messages, showSurvey, surveySubmitted]);
 
-  // Auto-scroll
+  // Auto-scroll to bottom
   const scrollToBottom = () => {
     if (!searchTerm && !startDate && !endDate) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -211,9 +328,30 @@ const ChatPage: React.FC = () => {
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isTyping, showSurvey]);
+    // 초기 로드가 완료된 후에만 자동 스크롤
+    if (!isInitialLoad) {
+      scrollToBottom();
+    }
+  }, [messages, isTyping, showSurvey, isInitialLoad]);
 
+  // Demo 세션 메시지가 남아 있으면 환영 메시지 하나만 남기고 정리
+  useEffect(() => {
+    if (cleanedDummy) return;
+    const hasDemo = messages.some(m => m.sessionId === 'demo-session');
+    if (hasDemo) {
+      setMessages([
+        {
+          id: 'init',
+          role: 'model',
+          text: '안녕하세요! 👋\n저는 Hey Me입니다. 당신의 개인 AI 에이전트입니다. 무엇을 도와드릴까요?',
+          timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+          createdAt: new Date().toISOString(),
+          sessionId: Date.now().toString(),
+        },
+      ]);
+      setCleanedDummy(true);
+    }
+  }, [messages, cleanedDummy]);
 
   // --- Handlers ---
 
@@ -224,7 +362,7 @@ const ChatPage: React.FC = () => {
     if (showSurvey) setShowSurvey(false);
 
     const now = new Date();
-    const userMsg: ChatMessage = {
+    const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
       text: input,
@@ -256,7 +394,7 @@ const ChatPage: React.FC = () => {
 
         const replyText = ragReply.answer || "죄송합니다. 응답을 생성하지 못했습니다.";
         const replyNow = new Date();
-        const botMsg: ChatMessage = {
+        const botMsg: Message = {
             id: (Date.now() + 1).toString(),
             role: 'model',
             text: replyText || "죄송합니다. 응답을 생성하지 못했습니다.",
@@ -277,7 +415,7 @@ const ChatPage: React.FC = () => {
     } catch (e: any) {
         console.error(e);
         setIsTyping(false);
-        const errorMsg: ChatMessage = {
+        const errorMsg: Message = {
             id: Date.now().toString(),
             role: 'model',
             text: "⚠️ 오류가 발생했습니다. 네트워크 연결을 확인하거나 나중에 다시 시도해주세요.",
@@ -373,7 +511,7 @@ const ChatPage: React.FC = () => {
 
   return (
     <div className="min-h-[calc(100vh-64px)] bg-gray-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col h-[800px] border border-gray-200 relative">
+      <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col h-[600px] border border-gray-200 relative">
         
         {/* Chat Header */}
         <div className="bg-[#1a0b2e] flex flex-col shrink-0 transition-all duration-300">
@@ -401,11 +539,8 @@ const ChatPage: React.FC = () => {
                 ) : (
                    <>
                         <div className="flex items-center gap-4">
-                            <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center border-2 border-white/20">
-                                <div className="w-6 h-6 bg-white/90 rounded-full animate-pulse" />
-                            </div>
+                            <HeyMeLogo size="xs" showCursor={true} showIcon={true} theme="dark" />
                             <div>
-                                <h2 className="text-white font-bold text-lg">Hey Me</h2>
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs text-purple-300">👋 나를 부르면 대답하는 AI</span>
                                 </div>
@@ -462,7 +597,7 @@ const ChatPage: React.FC = () => {
         </div>
 
         {/* Messages Area */}
-        <div className="flex-1 bg-[#1e1b2e] p-6 overflow-y-auto space-y-6 scrollbar-hide">
+        <div className="flex-1 bg-[#1e1b2e] p-6 overflow-y-auto space-y-6 scrollbar-transparent">
             {filteredMessages.length === 0 ? (
                  <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-2">
                     <Icons.Chat size={40} className="opacity-20" />
@@ -565,7 +700,7 @@ const ChatPage: React.FC = () => {
                    )}
                </div>
                <p className="text-[10px] text-gray-500">
-                   Powered by <span className="text-white font-bold">Code:Me</span> Client-Side AI
+                   Powered by <CodeMeLogo size="xs" showCursor={false} theme="dark" showBrackets={false} className="inline-flex" /> Client-Side AI
                </p>
            </div>
         </div>

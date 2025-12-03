@@ -32,7 +32,8 @@ import {
   Info,
   Edit3,
   FolderPlus,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Lock
 } from 'lucide-react';
 
 export const Icons = {
@@ -70,5 +71,6 @@ export const Icons = {
   Info,
   Edit: Edit3,
   FolderPlus,
-  Link: LinkIcon
+  Link: LinkIcon,
+  Lock
 };

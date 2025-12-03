@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { askLinkChat } from '../services/api';
+import { askLinkChat, getLinkInfo, LinkInfoResponse } from '../services/api';
 import { Icons } from '../components/Icons';
 
 type ChatRole = 'user' | 'bot';
@@ -19,23 +19,45 @@ const PublicChatPage: React.FC = () => {
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkInfo, setLinkInfo] = useState<LinkInfoResponse | null>(null);
+  const [isLoadingInfo, setIsLoadingInfo] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // 안내 메시지
-    setMessages([
-      {
-        id: 'welcome',
-        role: 'bot',
-        text: '이 링크는 소유자가 선택한 문서에 기반한 챗봇입니다. 궁금한 내용을 물어보세요.',
-        timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-      },
-    ]);
-  }, []);
+    // 링크 정보 불러오기
+    const loadLinkInfo = async () => {
+      if (!linkId) {
+        setError('유효하지 않은 링크입니다.');
+        setIsLoadingInfo(false);
+        return;
+      }
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+      try {
+        const info = await getLinkInfo(linkId);
+        setLinkInfo(info);
+        
+        // 안내 메시지
+        setMessages([
+          {
+            id: 'welcome',
+            role: 'bot',
+            text: `${info.user_name}님이 선택한 문서에 기반한 챗봇입니다. 궁금한 내용을 물어보세요.`,
+            timestamp: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+          },
+        ]);
+      } catch (e: any) {
+        setError('링크가 존재하지 않거나 만료되었습니다.');
+      } finally {
+        setIsLoadingInfo(false);
+      }
+    };
+
+    loadLinkInfo();
+  }, [linkId]);
+
+  // useEffect(() => {
+  //   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // }, [messages]);
 
   const handleSend = async () => {
     if (!linkId || !input.trim() || isSending) return;
@@ -79,8 +101,24 @@ const PublicChatPage: React.FC = () => {
       <div className="w-full max-w-4xl bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden flex flex-col h-[80vh]">
         <div className="p-5 bg-gradient-to-r from-purple-700 to-indigo-700 text-white flex items-center justify-between">
           <div>
-            <p className="text-sm text-purple-100">공개 링크 챗봇</p>
-            <h1 className="text-xl font-bold">선택된 문서 기반으로 답변합니다</h1>
+            {isLoadingInfo ? (
+              <>
+                <p className="text-sm text-purple-100">로딩 중...</p>
+                <h1 className="text-xl font-bold">정보를 불러오는 중입니다</h1>
+              </>
+            ) : linkInfo ? (
+              <>
+                <p className="text-sm text-purple-100">{linkInfo.user_name}님의 공개 링크 챗봇</p>
+                <h1 className="text-xl font-bold">
+                  {linkInfo.folder_name || linkInfo.title || '선택된 문서'} 기반으로 답변합니다
+                </h1>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-purple-100">공개 링크 챗봇</p>
+                <h1 className="text-xl font-bold">선택된 문서 기반으로 답변합니다</h1>
+              </>
+            )}
           </div>
           <button
             onClick={() => navigate('/')}

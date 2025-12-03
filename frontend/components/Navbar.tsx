@@ -1,9 +1,9 @@
-
 import React from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Icons } from './Icons';
 import { PageRoute } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { CodeMeLogo } from './CodeMeLogo';
 
 interface NavbarProps {
   onLoginClick: () => void;
@@ -36,9 +36,8 @@ const Navbar: React.FC<NavbarProps> = ({ onLoginClick }) => {
           {/* Logo */}
           <div className="flex items-center cursor-pointer" onClick={() => navigate('/')}>
             <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold text-brand-primary">{'<'}</span>
-              <span className="text-xl font-bold text-slate-800">Code:Me_</span>
-              <span className="text-xs text-brand-secondary font-medium mt-1">AI Agent Platform</span>
+              <CodeMeLogo size="md" showCursor={true} theme="light" />
+              <span className="text-xs font-medium mt-1" style={{ color: '#e11d48' }}>AI Agent Platform</span>
             </div>
           </div>
 

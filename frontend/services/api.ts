@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:9000';
+const BASE_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE) || 'http://localhost:9000';
 const TOKEN_KEY = 'codeme_jwt';
 
 const getCookie = (name: string): string | null => {
@@ -24,20 +24,30 @@ export interface LinkChatResponse {
   answer: string;
 }
 
+// 공개 링크 정보 조회 응답
+export interface LinkInfoResponse {
+  link_id: string;
+  user_name: string;
+  folder_name?: string;
+  title?: string;
+  is_active: boolean;
+}
+
 export const apiClient = {
   get token() {
-    const local = localStorage.getItem(TOKEN_KEY);
-    if (local) return local;
     const cookie = getCookie(TOKEN_KEY);
-    return cookie || '';
+    if (cookie) return cookie;
+    const local = localStorage.getItem(TOKEN_KEY);
+    return local || '';
   },
   setToken(token: string) {
-    localStorage.setItem(TOKEN_KEY, token);
+    // 쿠키 우선, 로컬스토리지 병행 저장(백업용)
     setCookie(TOKEN_KEY, token);
+    localStorage.setItem(TOKEN_KEY, token);
   },
   clearToken() {
-    localStorage.removeItem(TOKEN_KEY);
     clearCookie(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_KEY);
   },
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers: Record<string, string> = {
@@ -77,4 +87,21 @@ export async function askLinkChat(payload: LinkChatRequest): Promise<LinkChatRes
   }
 
   return resp.json() as Promise<LinkChatResponse>;
+}
+
+// 공개 링크 정보 조회 (Authorization 없이)
+export async function getLinkInfo(linkId: string): Promise<LinkInfoResponse> {
+  const resp = await fetch(`${BASE_URL}/api/v1/links/${linkId}/info`, {
+    method: 'GET',
+    headers: {
+      'Accept': 'application/json',
+    },
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`Get link info failed: ${resp.status} ${text}`);
+  }
+
+  return resp.json() as Promise<LinkInfoResponse>;
 }

@@ -1,7 +1,7 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
+import { apiClient } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
@@ -20,56 +20,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // 1) URL fragment/query에 token 이 있으면 저장 후 제거
-    const url = new URL(window.location.href);
-    const searchToken = url.searchParams.get('token');
+    // 페이지 로드 시 토큰 확인 (쿠키/로컬스토리지)
+    const token = apiClient.token;
+    const storedUser = localStorage.getItem('codeme_user');
 
-    let hashToken: string | null = null;
-    let cleanedHash = '';
-    if (window.location.hash) {
-      // "#/?token=..." 또는 "#token=..." 모두 처리
-      let hash = window.location.hash.substring(1); // remove '#'
-      if (hash.startsWith('/')) hash = hash.substring(1);
-      if (hash.startsWith('?')) hash = hash.substring(1);
-      const hashParams = new URLSearchParams(hash);
-      hashToken = hashParams.get('token');
-      hashParams.delete('token');
-      cleanedHash = hashParams.toString();
-    }
+    const loadUser = async () => {
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
 
-    const tokenFromUrl = searchToken || hashToken;
-    if (tokenFromUrl) {
-      localStorage.setItem('codeme_jwt', tokenFromUrl);
-      document.cookie = `codeme_jwt=${encodeURIComponent(tokenFromUrl)}; path=/`;
-      authService.restoreToken(); // sync api client
-      // URL 정리
-      url.searchParams.delete('token');
-      const newSearch = url.searchParams.toString();
-      const hashPart = cleanedHash ? `#/?${cleanedHash}` : '';
-      history.replaceState(null, '', `${url.pathname}${newSearch ? `?${newSearch}` : ''}${hashPart}`);
-    }
+      if (storedUser) {
+        try {
+          const parsed = JSON.parse(storedUser);
+          setUser(parsed);
+          setIsLoading(false);
+          return;
+        } catch (err) {
+          console.error('Failed to parse stored user:', err);
+          localStorage.removeItem('codeme_user');
+        }
+      }
 
-    // 2) 토큰이 있으면 /me 조회
-    const savedToken = authService.restoreToken();
-    if (!savedToken) {
-      setIsLoading(false);
-      return;
-    }
-    authService
-      .me()
-      .then((u) => setUser(u))
-      .catch(() => authService.logout())
-      .finally(() => setIsLoading(false));
+      // 토큰만 있을 때는 /me 호출로 사용자 정보 복원
+      try {
+        const u = await authService.me();
+        setUser(u);
+        localStorage.setItem('codeme_user', JSON.stringify(u));
+      } catch (err) {
+        console.error('Failed to fetch user from token:', err);
+        apiClient.clearToken();
+        localStorage.removeItem('codeme_user');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadUser();
+
   }, []);
 
   const login = async (email: string, password: string) => {
     const u = await authService.login(email, password);
     setUser(u);
+    localStorage.setItem('codeme_user', JSON.stringify(u));
   };
 
   const signup = async (email: string, password: string, name: string) => {
     const u = await authService.signup(email, password, name);
     setUser(u);
+    localStorage.setItem('codeme_user', JSON.stringify(u));
   };
 
   const loginWithGoogle = async () => {
@@ -79,6 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = () => {
     authService.logout();
     setUser(null);
+    localStorage.removeItem('codeme_user');
     // Clear any in-memory chat state via reload to ensure messages disappear immediately
     window.location.reload();
   };

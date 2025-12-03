@@ -147,7 +147,17 @@ async def google_callback(
     # 4) 우리 서비스용 JWT 발급
     access_token = create_access_token(str(user.id))
 
-    # 프론트로 리다이렉트 (HashRouter 사용: 토큰을 fragment로 전달)
+    # 프론트로 리다이렉트 (토큰은 쿠키로 전달)
     frontend_base = settings.frontend_base_url or "http://localhost:3000"
-    redirect_url = f"{frontend_base.rstrip('/')}/#/?token={access_token}"
-    return RedirectResponse(url=redirect_url)
+    redirect_url = frontend_base.rstrip("/")
+    resp = RedirectResponse(url=redirect_url)
+    # 개발 환경: JS에서 읽을 수 있도록 HttpOnly=False. 필요 시 Secure/Domain 설정 추가.
+    resp.set_cookie(
+        key="codeme_jwt",
+        value=access_token,
+        httponly=False,
+        samesite="lax",
+        path="/",
+        max_age=60 * 60 * 24 * 7,  # 7일
+    )
+    return resp
