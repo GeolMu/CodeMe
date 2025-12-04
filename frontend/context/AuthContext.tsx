@@ -80,8 +80,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     authService.logout();
     setUser(null);
     localStorage.removeItem('codeme_user');
-    // Clear any in-memory chat state via reload to ensure messages disappear immediately
-    window.location.reload();
+    // 루트로 이동하여 SPA 라우팅 404를 피하면서 상태 초기화
+    window.location.href = '/';
   };
 
   return (
