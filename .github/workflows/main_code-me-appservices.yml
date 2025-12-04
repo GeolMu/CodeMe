@@ -23,17 +23,22 @@ jobs:
 
       # [2] 프론트엔드 빌드 (dist 폴더 생성)
       - name: Install and Build Frontend
+        working-directory: frontend
         run: |
-          cd frontend
-          npm install
+          npm ci || npm install
           npm run build
-          cd ..
+          ls -la dist
 
       # [3] 빌드 결과물을 백엔드 폴더로 이동 (통합)
       - name: Move Frontend to Backend Static
         run: |
           mkdir -p backend/app/static
-          cp -r frontend/dist/* backend/app/static/
+          if [ ! -d frontend/dist ]; then
+            echo "dist folder not found after build"
+            ls -la frontend
+            exit 1
+          fi
+          cp -r frontend/dist/. backend/app/static/
 
       # [4] 파이썬 설정 (백엔드)
       - name: Set up Python version
