@@ -71,6 +71,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
+
+      - name: Azure Login (publish profile)
+        uses: azure/login@v1
+        with:
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_D3579ECF0733483284B32F24D4A612A8 }}
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
