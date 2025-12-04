@@ -8,15 +8,11 @@ const getCookie = (name: string): string | null => {
 
 const setCookie = (name: string, value: string, days = 7) => {
   const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
-  const isProdHost = typeof window !== 'undefined' && window.location.hostname.endsWith('code-me.co.kr');
-  const domain = isProdHost ? '; domain=.code-me.co.kr; SameSite=None; Secure' : '';
-  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/${domain}`;
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/`;
 };
 
 const clearCookie = (name: string) => {
-  const isProdHost = typeof window !== 'undefined' && window.location.hostname.endsWith('code-me.co.kr');
-  const domain = isProdHost ? '; domain=.code-me.co.kr; SameSite=None; Secure' : '';
-  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/${domain}`;
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
 };
 
 export interface LinkChatRequest {
@@ -76,7 +72,8 @@ export const getApiBase = () => BASE_URL;
 
 // 공개 링크 챗봇 호출 (Authorization 없이)
 export async function askLinkChat(payload: LinkChatRequest): Promise<LinkChatResponse> {
-  const resp = await fetch(`${BASE_URL}/api/v1/chat`, {
+  // FastAPI 라우트가 /chat/ 로 정의되어 있어 슬래시 포함
+  const resp = await fetch(`${BASE_URL}/api/v1/chat/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
