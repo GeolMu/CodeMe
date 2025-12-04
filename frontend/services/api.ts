@@ -72,7 +72,8 @@ export const getApiBase = () => BASE_URL;
 
 // 공개 링크 챗봇 호출 (Authorization 없이)
 export async function askLinkChat(payload: LinkChatRequest): Promise<LinkChatResponse> {
-  const resp = await fetch(`${BASE_URL}/api/v1/chat`, {
+  // FastAPI 라우트가 /chat/ 로 정의되어 있어 슬래시 포함
+  const resp = await fetch(`${BASE_URL}/api/v1/chat/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

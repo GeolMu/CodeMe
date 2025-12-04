@@ -148,15 +148,18 @@ async def google_callback(
     access_token = create_access_token(str(user.id))
 
     # 프론트로 리다이렉트 (토큰은 쿠키로 전달)
-    frontend_base = settings.frontend_base_url or "http://localhost:3000"
-    redirect_url = frontend_base.rstrip("/")
-    resp = RedirectResponse(url=redirect_url)
+    # 쿠키 유실 방지를 위해 HTTPS + 최상위 도메인 고정
+    redirect_url = "https://code-me.co.kr"
+    resp = RedirectResponse(url=redirect_url, status_code=302)
     # 개발 환경: JS에서 읽을 수 있도록 HttpOnly=False. 필요 시 Secure/Domain 설정 추가.
     resp.set_cookie(
         key="codeme_jwt",
         value=access_token,
+        # 프론트 JS가 읽어 Authorization 헤더에 넣을 수 있게 HttpOnly 해제
         httponly=False,
-        samesite="lax",
+        secure=True,
+        samesite="none",
+        domain=".code-me.co.kr",  # 서브도메인 공유
         path="/",
         max_age=60 * 60 * 24 * 7,  # 7일
     )
