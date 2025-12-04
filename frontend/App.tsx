@@ -10,6 +10,7 @@ import Footer from "./components/Footer";
 import LandingPage from "./pages/LandingPage";
 import ChatPage from "./pages/ChatPage";
 import AgentPage from "./pages/AgentPage";
+import AuthCallbackPage from "./pages/AuthCallbackPage";
 import ShareChatPage from "./pages/ShareChatPage";
 import DashboardPage from "./pages/DashboardPage";
 import UploadPage from "./pages/UploadPage";
@@ -112,6 +113,10 @@ const App: React.FC = () => {
               <Route
                 path="/c/:linkId"
                 element={<PublicChatPage />}
+              />
+              <Route
+                path="/auth/callback"
+                element={<AuthCallbackPage />}
               />
               <Route
                 path={PageRoute.PRICING}
