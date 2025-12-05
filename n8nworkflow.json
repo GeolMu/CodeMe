@@ -1,0 +1,978 @@
+{
+  "name": "real",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "index",
+        "options": {}
+      },
+      "id": "6b092946-3705-47ec-af87-c544ace4e5fb",
+      "name": "Webhook: Index Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        192
+      ],
+      "webhookId": "doc-index-main"
+    },
+    {
+      "parameters": {
+        "functionCode": "  // Chunk Text\nconst MAX_CHARS = 3000; // 필요하면 1500~4000 사이로 조절\n\nfunction chunkString(str, size) {\n  const chunks = [];\n  let i = 0;\n  while (i < str.length) {\n    chunks.push(str.slice(i, i + size));\n    i += size;\n  }\n  return chunks;\n}\n\nconst result = [];\n\nfor (const item of items) {\n  let text = item.json.text;\n\n  // txt 같은 경우: binary.data(base64) 에서 텍스트 추출\n  if (!text && item.binary && item.binary.data) {\n    const buff = Buffer.from(item.binary.data, 'base64');\n    text = buff.toString('utf8');\n  }\n\n  if (!text) {\n    // 여기서 나던 에러 메시지\n    throw new Error('Chunk Text: text 또는 binary.data 를 찾을 수 없습니다.');\n  }\n\n  // 줄바꿈/공백 살짝 정리\n  text = text\n    .replace(/\\r\\n/g, '\\n')\n    .replace(/\\u0000/g, '')        // 널문자 제거\n    .replace(/\\n{3,}/g, '\\n\\n');   // 너무 많은 줄바꿈 축소\n\n  const chunks = chunkString(text, MAX_CHARS);\n  const total = chunks.length;\n\n  chunks.forEach((chunk, index) => {\n    result.push({\n      json: {\n        // 원래 메타데이터 유지 (document_id, user_id 등)\n        ...item.json,\n        // 청크 정보\n        chunk_index: index,\n        chunk_count: total,\n        chunk_id: index,\n        total_chunks: total,\n        content: chunk,\n      },\n    });\n  });\n}\n\nreturn result;\n"
+      },
+      "id": "8d04f8fc-23c2-4658-9823-2a767fed07ef",
+      "name": "Chunk Text",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        848,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "87233e62-ac07-4c54-a240-dda9bcfb5a9f",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Search 문서 빌드\n\n// 1) 시작 Webhook (fallback용)\nconst trigger = $node['Webhook: Index Trigger'].json;\nconst root = trigger.body ?? trigger;\n\n// 2) 현재 요청의 청크 메타데이터는 Split In Batches에서 가져오기\n//    → 여기에는 content, document_id, user_id, group_id, blob_path, title 등 있음\nconst meta = $node['Split In Batches'].json;\n\n// 3) Azure OpenAI Embedding 응답에서 embedding 꺼내기\nconst body = $json.body ?? $json;\nconst emb =\n  body.data?.[0]?.embedding ||\n  $json.embedding ||\n  $json.output;\n\n// 4) 필드들 조립\nconst documentId =\n  meta.document_id ??\n  root.document_id ??\n  root.id;\n\nconst userId =\n  meta.user_id ??\n  root.user_id;\n\nconst groupId =\n  meta.group_id ??\n  root.group_id ??\n  null;\n\n// chunk 정보 (없으면 0)\nconst chunkId =\n  meta.chunk_id ??\n  meta.chunk_index ??\n  0;\n\n// 🔥 여기서 content는 Split In Batches(=meta)에서 가져온다\nconst content = meta.content ?? '';\n\nconst blobPath =\n  meta.blob_path ??\n  root.blob_path;\n\nconst title =\n  meta.title ??\n  root.title ??\n  meta.original_file_name ??\n  root.original_file_name ??\n  documentId;\n\nconst originalFileName =\n  meta.original_file_name ??\n  root.original_file_name ??\n  title;\n\nreturn [\n  {\n    json: {\n      value: [\n        {\n          '@search.action': 'upload',\n          id: `${documentId}_${chunkId}`,  // 문서ID_청크번호 (예: ..._0, ..._1, ...)\n          document_id: documentId,\n          user_id: userId,\n          group_id: groupId,\n          content,                         // ⬅ 이제 여기 들어감!\n          // 인덱스에 chunk_id 필드 없으면 아래 줄은 빼도 됨\n          chunk_id: chunkId,\n          source_path: blobPath,\n          title,\n          original_file_name: originalFileName,\n          embedding: emb,\n        },\n      ],\n    },\n  },\n];\n"
+      },
+      "id": "65accb61-f20e-4194-929a-75d0344d2bda",
+      "name": "Build Search Doc",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{ $node[\"Load Azure Env\"].json.AZURE_SEARCH_ENDPOINT }}/indexes/{{ $node[\"Load Azure Env\"].json.AZURE_SEARCH_INDEX_NAME }}/docs/index?api-version=2023-11-01\n",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "={{ { value: $json.value } }}",
+        "headerParametersJson": "={{ {\n  \"Content-Type\": \"application/json\",\n  \"api-key\": $node[\"Load Azure Env\"].json.AZURE_SEARCH_ADMIN_KEY\n} }}"
+      },
+      "id": "dcc8e161-1579-44d7-945e-481d648dad39",
+      "name": "Azure Search Upsert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "// 배치 종료 후 성공 콜백 payload\nreturn [{\n  document_id: $json.document_id || $items()[0].json.document_id,\n  status: 'processed',\n  chunk_count: $items()[0].json.total_chunks || 0,\n  error_message: null\n}];"
+      },
+      "id": "b3fac355-769f-4126-942f-c120a6b2b5d2",
+      "name": "Prep Callback Success",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1552,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{ $node[\"Load Azure Env\"].json.FASTAPI_CALLBACK_URL }}",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "document_id",
+              "value": "={{$(\"Load Azure Env\").item.json.body.id}}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.status ?? \"processed\" }}"
+            },
+            {
+              "name": "chunk_count",
+              "value": "={{ $json.chunk_count ?? $json.total_chunks ?? 0 }}"
+            },
+            {
+              "name": "error_message",
+              "value": "={{ $json.error_message ?? null }}"
+            }
+          ]
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "X-N8N-Token",
+              "value": "={{ $node[\"Load Azure Env\"].json.N8N_CALLBACK_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "2bf250d3-d167-4fe0-912d-534e21f100ba",
+      "name": "HTTP Callback Success",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1856,
+        720
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "78b61ff4-1f98-4600-97db-d0085664e278",
+      "name": "On Error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "functionCode": "const e = $json;\nreturn [{\n  document_id: e?.workflow?.lastNodeExecutedData?.document_id || '',\n  status: 'failed',\n  chunk_count: 0,\n  error_message: e?.message || 'indexing failed'\n}];"
+      },
+      "id": "866b2ee3-eb29-4efd-bbd0-810b6a860299",
+      "name": "Prep Callback Failure",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "blob",
+        "operation": "get",
+        "container": {
+          "__rl": true,
+          "value": "user-docs",
+          "mode": "list",
+          "cachedResultName": "user-docs"
+        },
+        "blob": {
+          "__rl": true,
+          "value": "={{ $json.body.blob_path }}",
+          "mode": "id"
+        },
+        "options": {},
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-base.azureStorage",
+      "typeVersion": 1,
+      "position": [
+        144,
+        192
+      ],
+      "id": "59f39aef-5413-4ad6-9a30-b01d535f1951",
+      "name": "Get blob",
+      "credentials": {
+        "azureStorageSharedKeyApi": {
+          "id": "cFSVV8qoUUdFJ9Ep",
+          "name": "Azure Storage account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $node[\"Load Azure Env\"].json.AZURE_OPENAI_ENDPOINT }}/openai/deployments/{{ $node[\"Load Azure Env\"].json.AZURE_OPENAI_EMBED_DEPLOYMENT }}/embeddings?api-version=2024-02-15-preview\n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "api-key",
+              "value": "={{ $node[\"Load Azure Env\"].json.AZURE_OPENAI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input",
+              "value": "={{$json.content}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1536,
+        192
+      ],
+      "id": "bd930840-25ba-4b8c-8cda-c1d55342b40a",
+      "name": "Azure OpenAI Embedding"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 들어온 body 유지하면서 env 값만 덧붙이기\nreturn [\n  {\n    ...$json,\n    AZURE_OPENAI_ENDPOINT: $env.AZURE_OPENAI_ENDPOINT,\n    AZURE_OPENAI_EMBED_DEPLOYMENT: $env.AZURE_OPENAI_EMBED_DEPLOYMENT,\n    AZURE_OPENAI_API_KEY: $env.AZURE_OPENAI_API_KEY,\n    AZURE_SEARCH_ENDPOINT: $env.AZURE_SEARCH_ENDPOINT,\n    AZURE_SEARCH_INDEX_NAME: $env.AZURE_SEARCH_INDEX_NAME,\n    AZURE_SEARCH_ADMIN_KEY: $env.AZURE_SEARCH_ADMIN_KEY,\n    FASTAPI_CALLBACK_URL: $env.FASTAPI_CALLBACK_URL,\n    N8N_CALLBACK_TOKEN: $env.N8N_CALLBACK_TOKEN,\n    AZURE_DI_ENDPOINT: $env.AZURE_DI_ENDPOINT,\n    AZURE_DI_API_KEY: $env.AZURE_DI_API_KEY,\n    AZURE_BLOB_BASE_URL: $env.AZURE_BLOB_BASE_URL,\n    AZURE_BLOB_SAS: $env.AZURE_BLOB_SAS,\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -16,
+        192
+      ],
+      "id": "517bf83f-f63b-439c-b6cf-66e2571c2cfb",
+      "name": "Load Azure Env"
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{ $node[\"Load Azure Env\"].json.FASTAPI_CALLBACK_URL }}",
+        "options": {},
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "document_id",
+              "value": "={{ $json.document_id || $items(0).json.document_id || '' }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.status || 'failed' }}"
+            },
+            {
+              "name": "error_message",
+              "value": "={{ $json.error_message || 'indexing failed' }}"
+            }
+          ]
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "X-N8N-Token",
+              "value": "={{ $node[\"Load Azure Env\"].json.N8N_CALLBACK_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "9a3a27e1-008e-458f-9a41-c930ee1af339",
+      "name": "HTTP Callback Failur2e",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1280,
+        832
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "requestMethod": "POST",
+        "url": "={{ $node[\"Load Azure Env\"].json.FASTAPI_CALLBACK_URL }}",
+        "options": {
+          "bodyContentType": "json"
+        },
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "document_id",
+              "value": "={{ $node[\"Webhook: Index Trigger\"].json.body.document_id }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $json.status || 'failed' }}"
+            },
+            {
+              "name": "chunk_count",
+              "value": "={{ $json.chunk_count || 0 }}"
+            },
+            {
+              "name": "error_message",
+              "value": "={{ $json.error_message || $json.error || $json.message || '' }}"
+            }
+          ]
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "X-N8N-Token",
+              "value": "={{ $node[\"Load Azure Env\"].json.N8N_CALLBACK_TOKEN }}"
+            }
+          ]
+        }
+      },
+      "id": "93a2c3bb-1373-4edf-a84f-92bd9832a928",
+      "name": "HTTP Callback Failure",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [
+        1504,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 청크 + 원본 메타데이터 붙이기\n\nconst trigger = $node['Webhook: Index Trigger'].json;\nconst body = trigger.body ?? trigger;\n\nreturn $items().map(item => {\n  const chunk = item.json;\n\n  const chunkId = chunk.chunk_id ?? chunk.chunk_index ?? 0;\n  const totalChunks = chunk.total_chunks ?? chunk.chunk_count ?? 1;\n\n  return {\n    json: {\n      // 청크 정보 그대로/변환해서 유지\n      ...chunk,\n      chunk_id: chunkId,\n      total_chunks: totalChunks,\n\n      // Webhook에서 들어온 메타데이터 덮어쓰기\n      document_id: body.document_id,\n      user_id: body.user_id,\n      group_id: body.group_id,\n      blob_path: body.blob_path,\n      title: body.title,\n      original_file_name: body.original_file_name,\n    },\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1056,
+        192
+      ],
+      "id": "c03b66a5-8157-4241-a9f8-ba4946d74644",
+      "name": "Attach Metadata"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{$node[\"Webhook: Index Trigger\"].json.body?.mime_type || $node[\"Webhook: Index Trigger\"].json.mime_type}}",
+                    "rightValue": "text/plain",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "fe6950cc-6fb5-41b9-8ff9-286b06210ac6"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "0cc9597d-baf8-4106-91b4-6b2eca151dda",
+                    "leftValue": "={{$node[\"Webhook: Index Trigger\"].json.body?.mime_type || $node[\"Webhook: Index Trigger\"].json.mime_type}}",
+                    "rightValue": "application/pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "020f361a-1dcd-4630-b832-2ad9801057fb",
+                    "leftValue": "={{$node[\"Webhook: Index Trigger\"].json.body?.mime_type || $node[\"Webhook: Index Trigger\"].json.mime_type}}",
+                    "rightValue": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a1a6b7d8-001f-4e08-b0ed-ed807e29d5da",
+                    "leftValue": "={{$node[\"Webhook: Index Trigger\"].json.body?.mime_type || $node[\"Webhook: Index Trigger\"].json.mime_type}}",
+                    "rightValue": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.3,
+      "position": [
+        480,
+        160
+      ],
+      "id": "8e38c68a-f24e-48f6-a30e-cfcbbcf28b28",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "amount": 3
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        432,
+        448
+      ],
+      "id": "e7f10b4c-01e3-4e9f-afa9-470f69d2caf6",
+      "name": "Wait for DI",
+      "webhookId": "00241af6-6f9b-4423-b65c-1418ca7719fb"
+    },
+    {
+      "parameters": {
+        "url": "={{$node[\"Prepare DI Result URL\"].json[\"diResultUrl\"]}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "={{$node[\"Load Azure Env\"].json.AZURE_DI_API_KEY}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        624
+      ],
+      "id": "26d2110c-6017-4f96-a59f-d1a5b06e7a9f",
+      "name": "Get DI Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "// DI -> Text (정상 analyzeResult.content 기준)\n\nconst output = [];\n\nfor (const item of items) {\n  const src = item.json || {};\n\n  // analyzeResult 위치 찾기\n  const analyze =\n    src.analyzeResult ||\n    src.body?.analyzeResult ||\n    src; // fallback\n\n  const content =\n    (analyze.content && analyze.content.trim()) || \"\";\n\n  if (!content) {\n    throw new Error(\"Document Intelligence 결과에 content가 없습니다.\");\n  }\n\n  output.push({\n    json: {\n      ...src,\n      text: content, // ⬅ Chunk Text 노드가 읽는 필드\n    },\n  });\n}\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        448
+      ],
+      "id": "0722ede1-5996-4d9d-ada6-6b1ae2bd7a08",
+      "name": "DI → Text"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item;\n\nconst baseUrl =\n  $node[\"Load Azure Env\"].json.AZURE_BLOB_BASE_URL ||\n  'https://<account>.blob.core.windows.net/<container>'; // fallback\n\nconst sas = $node[\"Load Azure Env\"].json.AZURE_BLOB_SAS || '';\n\nconst blobPath = item.json.name; // Get blob 결과의 name\n\n// 앞뒤 슬래시 정리\nconst url =\n  baseUrl.replace(/\\/+$/, '') + '/' +\n  blobPath.replace(/^\\/+/, '') +\n  (sas ? sas : '');\n\nreturn [\n  {\n    json: {\n      diFileUrl: url,\n    },\n  },\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        192
+      ],
+      "id": "4f9934a5-4c0d-4e56-b0cb-98a5bc3e2784",
+      "name": "Build DI Url"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Load Azure Env\"].json.AZURE_DI_ENDPOINT}}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=2024-11-30",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Ocp-Apim-Subscription-Key",
+              "value": "={{$node[\"Load Azure Env\"].json.AZURE_DI_API_KEY}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "urlSource",
+              "value": "={{$json.diFileUrl}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -48,
+        672
+      ],
+      "id": "2aaa6504-a782-4766-92cb-e58626778a35",
+      "name": "Extract text (Azure DI)",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// 각 item에는 json.diFileUrl 이 들어있다고 가정\n// Azure Document Intelligence 설정은 \"Load Azure Env\" 노드에서 가져옴\n\nconst endpoint = $node[\"Load Azure Env\"].json.AZURE_DI_ENDPOINT;\nconst apiKey   = $node[\"Load Azure Env\"].json.AZURE_DI_API_KEY;\n\n// prebuilt-layout 분석 엔드포인트\nconst url = `${endpoint}/documentintelligence/documentModels/prebuilt-layout:analyze?api-version=2024-11-30`;\n\nconst results = [];\n\nfor (const item of items) {\n  const diFileUrl = item.json.diFileUrl;\n\n  const options = {\n    method: 'POST',\n    uri: url,\n    headers: {\n      'Ocp-Apim-Subscription-Key': apiKey,\n    },\n    body: {\n      urlSource: diFileUrl,\n    },\n    json: true,\n    resolveWithFullResponse: true,   // 헤더까지 받기 위해\n  };\n\n  const res = await this.helpers.request(options);\n\n  // Prepare DI Result URL 노드가 쓰기 좋은 형태로 정리\n  results.push({\n    json: {\n      statusCode: res.statusCode,\n      headers:   res.headers,\n      body:      res.body,\n    },\n  });\n}\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        96,
+        448
+      ],
+      "id": "210a1598-399f-480c-8a6e-dcefc8c89d70",
+      "name": "Extract text (Azure DI - Code)"
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\n\nfor (const item of items) {\n  // Code 노드에서 넘겨준 구조: { statusCode, headers, body }\n  let headers = item.json.headers || {};\n\n  // 혹시 배열로 들어오는 경우 방어코드\n  if (Array.isArray(headers)) {\n    headers = headers[0] || {};\n  }\n\n  // 헤더 키는 보통 소문자로 들어옴\n  const opLocation =\n    headers['operation-location'] ||\n    headers['Operation-Location'] ||\n    headers['operation-location'.toLowerCase()];\n\n  if (!opLocation) {\n    throw new Error('Document Intelligence 응답에 operation-location 헤더가 없습니다.');\n  }\n\n  // 다음 노드에서 polling 할 URL만 넘겨주면 됨\n  out.push({\n    json: {\n      diResultUrl: opLocation,\n      // 필요하면 디버그용으로 statusCode/body도 같이 넘겨도 됨\n      statusCode: item.json.statusCode,\n    },\n  });\n}\n\nreturn out;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        448
+      ],
+      "id": "4d5bd1d6-feb7-44af-968b-6ae4bca4a0e7",
+      "name": "Prepare DI Result URL"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f0b43444-144f-44ed-9641-a3b7bc0d67f9",
+              "leftValue": "={{$json[\"status\"]}}",
+              "rightValue": "succeeded",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        592,
+        624
+      ],
+      "id": "cd922128-2107-40ce-be50-bf433f4321ff",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check DI Status & Retry Count\n\nconst maxTries = 30; // 최대 폴링 횟수 (예: 30번 * 5초 = 최대 150초)\n\nreturn items.map(item => {\n  const j = item.json || {};\n\n  const status =\n    j.status ||\n    j.body?.status;\n\n  // 1) 실패/취소 상태면 바로 에러\n  if (status === \"failed\" || status === \"cancelled\" || status === \"canceled\") {\n    throw new Error(`Document Intelligence failed. status=${status}`);\n  }\n\n  // 2) 재시도 횟수 관리\n  const tries = (j._diTries || 0) + 1;\n  if (tries > maxTries) {\n    throw new Error(\n      `Document Intelligence polling exceeded ${maxTries} tries (status=${status})`,\n    );\n  }\n\n  j._diTries = tries;\n  item.json = j;\n  return item;\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        640
+      ],
+      "id": "31a503d0-3b6d-4d13-b9ef-84508a82a0b1",
+      "name": "Check DI Status & Retry"
+    },
+    {
+      "parameters": {
+        "resource": "blob",
+        "operation": "get",
+        "container": {
+          "__rl": true,
+          "value": "user-docs",
+          "mode": "list",
+          "cachedResultName": "user-docs"
+        },
+        "blob": {
+          "__rl": true,
+          "value": "={{ $node[\"Webhook: Index Trigger\"].json.body.blob_path }}",
+          "mode": "id"
+        },
+        "options": {},
+        "requestOptions": {}
+      },
+      "type": "n8n-nodes-base.azureStorage",
+      "typeVersion": 1,
+      "position": [
+        560,
+        -32
+      ],
+      "id": "3caf24ab-9991-4cdb-9c66-47e6054ac4c9",
+      "name": "Txt Get blob",
+      "credentials": {
+        "azureStorageSharedKeyApi": {
+          "id": "cFSVV8qoUUdFJ9Ep",
+          "name": "Azure Storage account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Txt → Text : Azure Storage get blob 결과에서 텍스트 추출\n\nconst results = [];\n\nfor (const item of items) {\n  let text = item.json.text || '';\n\n  // 1) binary 쪽에서 base64 문자열 찾기\n  let base64 = null;\n\n  if (item.binary) {\n    // 가장 일반적인 구조: binary.data.data\n    if (item.binary.data) {\n      if (typeof item.binary.data === 'string') {\n        base64 = item.binary.data;\n      } else if (\n        typeof item.binary.data === 'object' &&\n        typeof item.binary.data.data === 'string'\n      ) {\n        base64 = item.binary.data.data;\n      }\n    }\n\n    // 혹시 키 이름이 data가 아닐 때 대비 (첫 번째 binary 키 사용)\n    if (!base64) {\n      const keys = Object.keys(item.binary);\n      if (keys.length > 0) {\n        const bin = item.binary[keys[0]];\n        if (typeof bin === 'string') {\n          base64 = bin;\n        } else if (bin && typeof bin.data === 'string') {\n          base64 = bin.data;\n        }\n      }\n    }\n  }\n\n  // 2) text가 아직 없고, base64를 찾았으면 Buffer로 디코딩\n  if (!text && base64) {\n    const buff = Buffer.from(base64, 'base64');\n    text = buff.toString('utf8');\n  }\n\n  // 3) 여전히 text가 없으면 에러\n  if (!text) {\n    throw new Error(\n      'Txt → Text: text를 찾을 수 없습니다. json.text도 없고 binary에 base64 데이터도 없습니다.',\n    );\n  }\n\n  // 4) 최종 결과 반환 (json.text 필드에 순수 텍스트)\n  results.push({\n    json: {\n      ...item.json,\n      text,\n    },\n  });\n}\n\nreturn results;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        -32
+      ],
+      "id": "06927c53-e805-413c-af46-884660e1dc9b",
+      "name": "Txt → Text"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook: Index Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Azure Env",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Text": {
+      "main": [
+        [
+          {
+            "node": "Attach Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "Prep Callback Success",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Azure OpenAI Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Search Doc": {
+      "main": [
+        [
+          {
+            "node": "Azure Search Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure Search Upsert": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Callback Success": {
+      "main": [
+        [
+          {
+            "node": "HTTP Callback Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On Error": {
+      "main": [
+        [
+          {
+            "node": "Prep Callback Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prep Callback Failure": {
+      "main": [
+        [
+          {
+            "node": "HTTP Callback Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get blob": {
+      "main": [
+        [
+          {
+            "node": "Build DI Url",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Azure OpenAI Embedding": {
+      "main": [
+        [
+          {
+            "node": "Build Search Doc",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Azure Env": {
+      "main": [
+        [
+          {
+            "node": "Get blob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Metadata": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Txt Get blob",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract text (Azure DI - Code)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract text (Azure DI - Code)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract text (Azure DI - Code)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for DI": {
+      "main": [
+        [
+          {
+            "node": "Get DI Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get DI Result": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DI → Text": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build DI Url": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare DI Result URL": {
+      "main": [
+        [
+          {
+            "node": "Wait for DI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text (Azure DI - Code)": {
+      "main": [
+        [
+          {
+            "node": "Prepare DI Result URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "DI → Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check DI Status & Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check DI Status & Retry": {
+      "main": [
+        [
+          {
+            "node": "Wait for DI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Txt Get blob": {
+      "main": [
+        [
+          {
+            "node": "Txt → Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Txt → Text": {
+      "main": [
+        [
+          {
+            "node": "Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "58f0216e-7b0e-4a9d-a209-1c93a59ef033",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "061134d80b5d1260887925d3d8c3e524db2b0cf81d19a1c146eba918ad779534"
+  },
+  "id": "C7M8XObV5LoBKNzm",
+  "tags": []
+}
